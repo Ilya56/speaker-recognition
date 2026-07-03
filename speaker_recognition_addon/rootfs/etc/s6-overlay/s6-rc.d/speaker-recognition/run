@@ -7,23 +7,27 @@ bashio::log.info "Starting Speaker Recognition Service..."
 APP_HOST=$(bashio::config 'host')
 APP_PORT=$(bashio::config 'port')
 APP_LOG_LEVEL=$(bashio::config 'log_level' | tr '[:lower:]' '[:upper:]')
-APP_ACCESS_LOG=$(bashio::config 'access_log')
 APP_EMBEDDINGS_DIR=$(bashio::config 'embeddings_dir')
+
+if bashio::config.true 'access_log'; then
+    APP_ACCESS_LOG_ARG="--access-log"
+else
+    APP_ACCESS_LOG_ARG="--no-access-log"
+fi
 
 bashio::log.info "Configuration:"
 bashio::log.info "  Host: ${APP_HOST}"
 bashio::log.info "  Port: ${APP_PORT}"
 bashio::log.info "  Log Level: ${APP_LOG_LEVEL}"
-bashio::log.info "  Access Log: ${APP_ACCESS_LOG}"
+bashio::log.info "  Access Log: ${APP_ACCESS_LOG_ARG}"
 bashio::log.info "  Embeddings Directory: ${APP_EMBEDDINGS_DIR}"
 
 mkdir -p "${APP_EMBEDDINGS_DIR}"
 
-export HOST="${APP_HOST}"
-export PORT="${APP_PORT}"
-export LOG_LEVEL="${APP_LOG_LEVEL}"
-export ACCESS_LOG="${APP_ACCESS_LOG}"
-export EMBEDDINGS_DIR="${APP_EMBEDDINGS_DIR}"
-
 cd /app
-exec python3 -m speaker_recognition
+exec python3 -m speaker_recognition \
+    --host "${APP_HOST}" \
+    --port "${APP_PORT}" \
+    --log-level "${APP_LOG_LEVEL}" \
+    "${APP_ACCESS_LOG_ARG}" \
+    --embeddings-dir "${APP_EMBEDDINGS_DIR}"

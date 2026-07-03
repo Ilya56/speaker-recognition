@@ -30,7 +30,6 @@ RUN uv pip install --system --no-cache --index-strategy unsafe-best-match --brea
 
 ENV HOST=0.0.0.0 \
     PORT=8099 \
-    LOG_LEVEL=INFO \
     ACCESS_LOG=true \
     EMBEDDINGS_DIR=/share/speaker_recognition/embeddings
 
