@@ -37,5 +37,3 @@ ENV HOST=0.0.0.0 \
 COPY rootfs /
 
 RUN chmod a+x /etc/s6-overlay/s6-rc.d/speaker-recognition/run
-
-CMD ["/init"]
