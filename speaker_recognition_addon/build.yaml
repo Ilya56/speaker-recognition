@@ -3,7 +3,7 @@ build_from:
 labels:
   org.opencontainers.image.title: "Home Assistant Add-on: Speaker Recognition"
   org.opencontainers.image.description: "Speaker recognition service using voice embeddings for identification."
-  org.opencontainers.image.source: "https://github.com/eulemitkeule/speaker-recognition"
+  org.opencontainers.image.source: "https://github.com/Ilya56/speaker-recognition"
   org.opencontainers.image.licenses: "MIT"
 args:
   TEMPIO_VERSION: "2021.09.0"
