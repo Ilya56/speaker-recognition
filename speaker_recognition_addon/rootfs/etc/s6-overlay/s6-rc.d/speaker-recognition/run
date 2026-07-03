@@ -25,7 +25,7 @@ bashio::log.info "  Embeddings Directory: ${APP_EMBEDDINGS_DIR}"
 mkdir -p "${APP_EMBEDDINGS_DIR}"
 
 cd /app
-exec python3 -m speaker_recognition \
+exec python3 -m speaker_recognition serve \
     --host "${APP_HOST}" \
     --port "${APP_PORT}" \
     --log-level "${APP_LOG_LEVEL}" \
