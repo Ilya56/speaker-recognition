@@ -1,0 +1,2 @@
+speaker_recognition_addon/rootfs/** text eol=lf
+*.sh text eol=lf
