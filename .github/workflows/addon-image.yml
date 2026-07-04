@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+      - fix/stabilize-addon-startup
     paths:
       - ".github/workflows/addon-image.yml"
       - "pyproject.toml"
