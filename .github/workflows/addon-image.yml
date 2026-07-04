@@ -1,0 +1,63 @@
+name: Add-on image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - fix/stabilize-addon-startup
+    paths:
+      - ".github/workflows/addon-image.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "speaker_recognition/**"
+      - "speaker_recognition_addon/**"
+
+jobs:
+  build-addon:
+    runs-on: ubuntu-latest
+    name: Build amd64 add-on image
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Prepare add-on build context
+        run: |
+          cp pyproject.toml speaker_recognition_addon/
+          cp -r speaker_recognition speaker_recognition_addon/
+
+      - name: Read add-on version
+        id: addon
+        shell: python
+        run: |
+          import pathlib
+          import os
+          import re
+
+          config = pathlib.Path("speaker_recognition_addon/config.yaml").read_text()
+          match = re.search(r'^version:\s*["\']?([^"\'\n]+)', config, re.MULTILINE)
+          if not match:
+              raise SystemExit("Could not find add-on version in config.yaml")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"version={match.group(1)}\n")
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish add-on image
+        uses: home-assistant/builder@2025.11.0
+        with:
+          args: |
+            --amd64 \
+            --target ./speaker_recognition_addon \
+            --image speaker-recognition-addon \
+            --docker-hub ghcr.io/ilya56 \
+            --version ${{ steps.addon.outputs.version }} \
+            --addon
