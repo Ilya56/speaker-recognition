@@ -27,7 +27,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 RUN uv pip install --system --no-cache --break-system-packages -e ".[server]" && \
     python3 -c "import numpy, torch, resemblyzer; from speaker_recognition.api import app" && \
-    python3 -m speaker_recognition serve --help >/dev/null
+    python3 -m speaker_recognition --help >/dev/null
 
 ENV HOST=0.0.0.0 \
     PORT=8099 \
