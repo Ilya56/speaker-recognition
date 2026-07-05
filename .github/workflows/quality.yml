@@ -91,7 +91,29 @@ jobs:
 
       - name: Run tests
         run: |
-          uv run pytest --cov=. --cov-report=term tests -v
+          uv run pytest --cov=. --cov-report=term -m "not slow" tests -v
+
+  real-stack-tests:
+    if: github.event_name == 'workflow_dispatch'
+    needs: cache
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.9"
+          enable-cache: true
+          cache-suffix: uv-${{ runner.os }}-3.9
+
+      - name: Install dependecies
+        run: uv sync --all-groups
+
+      - name: Run real stack tests
+        run: |
+          uv run pytest -m slow tests/test_integration.py -v
 
   find-addons:
     name: Find add-ons

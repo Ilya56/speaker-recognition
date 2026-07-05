@@ -16,21 +16,29 @@ from speaker_recognition.models import (
 class SpeakerRecognitionClient:
     """Client for interacting with the speaker recognition API."""
 
-    def __init__(self, base_url: str, timeout: float = 30.0):
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 30.0,
+        transport: Optional[httpx.AsyncBaseTransport] = None,
+    ):
         """Initialize the client.
 
         Args:
             base_url: Base URL of the speaker recognition API
             timeout: Request timeout in seconds
+            transport: Optional custom HTTPX async transport
         """
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._transport = transport
         self._client: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self) -> "SpeakerRecognitionClient":
         """Enter async context manager."""
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
+            transport=self._transport,
             timeout=self._timeout,
         )
         return self
@@ -54,6 +62,7 @@ class SpeakerRecognitionClient:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
+                transport=self._transport,
                 timeout=self._timeout,
             )
         return self._client

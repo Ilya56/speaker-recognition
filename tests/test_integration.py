@@ -5,16 +5,20 @@ import wave
 from multiprocessing import Process
 from pathlib import Path
 
+import httpx
+import numpy as np
 import pytest
 import uvicorn
 
 from speaker_recognition import SpeakerRecognitionClient
+from speaker_recognition.api import app
 from speaker_recognition.models import (
     AudioInput,
     RecognitionRequest,
     TrainingRequest,
     VoiceSample,
 )
+from speaker_recognition.recognizer import recognizer
 
 EXAMPLE_DATA_DIR = Path(__file__).parent.parent / "example_data"
 API_HOST = "127.0.0.1"
@@ -42,6 +46,67 @@ def read_audio_file_as_base64(file_path: Path) -> tuple[str, int]:
         sample_rate = wav_file.getframerate()
         pcm_data = wav_file.readframes(wav_file.getnframes())
         return base64.b64encode(pcm_data).decode("utf-8"), sample_rate
+
+
+def build_two_speaker_training_request() -> TrainingRequest:
+    """Build a training request from the example speaker WAV files."""
+    speaker1_audio_data, speaker1_rate = read_audio_file_as_base64(
+        EXAMPLE_DATA_DIR / "speaker1_1.wav"
+    )
+    speaker2_audio_data, speaker2_rate = read_audio_file_as_base64(
+        EXAMPLE_DATA_DIR / "speaker2_1.wav"
+    )
+
+    return TrainingRequest(
+        voice_samples=[
+            VoiceSample(
+                user="speaker1",
+                audio=AudioInput(
+                    audio_data=speaker1_audio_data,
+                    sample_rate=speaker1_rate,
+                ),
+            ),
+            VoiceSample(
+                user="speaker2",
+                audio=AudioInput(
+                    audio_data=speaker2_audio_data,
+                    sample_rate=speaker2_rate,
+                ),
+            ),
+        ]
+    )
+
+
+def build_recognition_request(file_name: str) -> RecognitionRequest:
+    """Build a recognition request from an example WAV file."""
+    audio_data, sample_rate = read_audio_file_as_base64(EXAMPLE_DATA_DIR / file_name)
+    return RecognitionRequest(
+        audio=AudioInput(audio_data=audio_data, sample_rate=sample_rate)
+    )
+
+
+class FakeVoiceEncoder:
+    """Fast deterministic encoder for API/client contract tests."""
+
+    def embed_utterance(self, wav: np.ndarray) -> np.ndarray:
+        """Return stable fake speaker classes for the bundled fixtures."""
+        if np.std(wav) > 0.18:
+            return np.asarray([1.0, 0.0], dtype=np.float32)
+        return np.asarray([0.0, 1.0], dtype=np.float32)
+
+
+@pytest.fixture()
+def fake_encoder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Patch the global recognizer to avoid the real Resemblyzer/Torch stack."""
+    recognizer._reference_embeddings = {}
+    recognizer._is_trained = False
+    recognizer.embeddings_directory = str(tmp_path / "embeddings")
+    monkeypatch.setattr(recognizer, "_encoder", FakeVoiceEncoder())
+
+    yield
+
+    recognizer._reference_embeddings = {}
+    recognizer._is_trained = False
 
 
 @pytest.fixture(scope="module")
@@ -78,8 +143,8 @@ def api_server():
 
 
 @pytest.mark.asyncio
-async def test_train_and_recognize_speakers(api_server: None):
-    """Test training with two speakers and recognizing them with different samples."""
+async def test_api_client_train_and_recognize_speakers(fake_encoder: None):
+    """Test API/client contracts without the slow real ML encoder."""
     # Read training audio files
     speaker1_training_file = EXAMPLE_DATA_DIR / "speaker1_1.wav"
     speaker2_training_file = EXAMPLE_DATA_DIR / "speaker2_1.wav"
@@ -94,54 +159,73 @@ async def test_train_and_recognize_speakers(api_server: None):
     assert speaker1_recognition_file.exists(), f"Missing {speaker1_recognition_file}"
     assert speaker2_recognition_file.exists(), f"Missing {speaker2_recognition_file}"
 
-    async with SpeakerRecognitionClient(API_BASE_URL, timeout=60.0) as client:
-        # Health check
+    transport = httpx.ASGITransport(app=app)
+    async with SpeakerRecognitionClient(
+        "http://testserver",
+        timeout=5.0,
+        transport=transport,
+    ) as client:
         health = await client.health_check()
         assert health.status == "healthy"
 
-        # Prepare training data
-        speaker1_audio_data, speaker1_rate = read_audio_file_as_base64(
-            speaker1_training_file
+        training_result = await client.train(build_two_speaker_training_request())
+        assert training_result.status == "success"
+        assert training_result.count == 2
+        assert "speaker1" in training_result.trained_users
+        assert "speaker2" in training_result.trained_users
+
+        recognition_result_1 = await client.recognize(
+            build_recognition_request("speaker1_2.wav")
         )
-        speaker2_audio_data, speaker2_rate = read_audio_file_as_base64(
-            speaker2_training_file
+        assert recognition_result_1.user_id == "speaker1", (
+            f"Expected speaker1, got {recognition_result_1.user_id} "
+            f"with confidence {recognition_result_1.confidence}. "
+            f"All scores: {recognition_result_1.all_scores}"
         )
 
-        training_request = TrainingRequest(
-            voice_samples=[
-                VoiceSample(
-                    user="speaker1",
-                    audio=AudioInput(
-                        audio_data=speaker1_audio_data, sample_rate=speaker1_rate
-                    ),
-                ),
-                VoiceSample(
-                    user="speaker2",
-                    audio=AudioInput(
-                        audio_data=speaker2_audio_data, sample_rate=speaker2_rate
-                    ),
-                ),
-            ]
+        recognition_result_2 = await client.recognize(
+            build_recognition_request("speaker2_2.wav")
         )
+        assert recognition_result_2.user_id == "speaker2", (
+            f"Expected speaker2, got {recognition_result_2.user_id} "
+            f"with confidence {recognition_result_2.confidence}. "
+            f"All scores: {recognition_result_2.all_scores}"
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.slow
+async def test_real_stack_train_and_recognize_speakers(api_server: None):
+    """Test the real HTTP server and Resemblyzer/Torch encoder stack."""
+    # Read training audio files
+    speaker1_training_file = EXAMPLE_DATA_DIR / "speaker1_1.wav"
+    speaker2_training_file = EXAMPLE_DATA_DIR / "speaker2_1.wav"
+
+    # Read recognition audio files
+    speaker1_recognition_file = EXAMPLE_DATA_DIR / "speaker1_2.wav"
+    speaker2_recognition_file = EXAMPLE_DATA_DIR / "speaker2_2.wav"
+
+    # Verify all files exist
+    assert speaker1_training_file.exists(), f"Missing {speaker1_training_file}"
+    assert speaker2_training_file.exists(), f"Missing {speaker2_training_file}"
+    assert speaker1_recognition_file.exists(), f"Missing {speaker1_recognition_file}"
+    assert speaker2_recognition_file.exists(), f"Missing {speaker2_recognition_file}"
+
+    async with SpeakerRecognitionClient(API_BASE_URL, timeout=300.0) as client:
+        health = await client.health_check()
+        assert health.status == "healthy"
 
         # Train the model
-        training_result = await client.train(training_request)
+        training_result = await client.train(build_two_speaker_training_request())
         assert training_result.status == "success"
         assert training_result.count == 2
         assert "speaker1" in training_result.trained_users
         assert "speaker2" in training_result.trained_users
 
         # Test recognition for speaker1
-        speaker1_recognition_audio, speaker1_rec_rate = read_audio_file_as_base64(
-            speaker1_recognition_file
+        recognition_result_1 = await client.recognize(
+            build_recognition_request("speaker1_2.wav")
         )
-        recognition_request_1 = RecognitionRequest(
-            audio=AudioInput(
-                audio_data=speaker1_recognition_audio, sample_rate=speaker1_rec_rate
-            )
-        )
-
-        recognition_result_1 = await client.recognize(recognition_request_1)
         assert recognition_result_1.user_id == "speaker1", (
             f"Expected speaker1, got {recognition_result_1.user_id} "
             f"with confidence {recognition_result_1.confidence}. "
@@ -149,16 +233,9 @@ async def test_train_and_recognize_speakers(api_server: None):
         )
 
         # Test recognition for speaker2
-        speaker2_recognition_audio, speaker2_rec_rate = read_audio_file_as_base64(
-            speaker2_recognition_file
+        recognition_result_2 = await client.recognize(
+            build_recognition_request("speaker2_2.wav")
         )
-        recognition_request_2 = RecognitionRequest(
-            audio=AudioInput(
-                audio_data=speaker2_recognition_audio, sample_rate=speaker2_rec_rate
-            )
-        )
-
-        recognition_result_2 = await client.recognize(recognition_request_2)
         assert recognition_result_2.user_id == "speaker2", (
             f"Expected speaker2, got {recognition_result_2.user_id} "
             f"with confidence {recognition_result_2.confidence}. "
